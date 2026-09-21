@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.npm-cache/
+.playwright-cli/
+output/
+.env
+.env.*
