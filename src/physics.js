@@ -12,7 +12,7 @@ export class WaterPhysics {
     this.world.numSolverIterations = 8;
     this.time = 0; this.lastPulse = [-Infinity, -Infinity]; this.pulses = [];
     this.orientation = new Quaternion(); this.count = 0; this.winTime = 0; this.won = false;
-    const wall = (x,y,z,hx,hy,hz) => this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx,hy,hz).setTranslation(x,y,z).setFriction(.3).setRestitution(.12));
+    const wall = (x,y,z,hx,hy,hz) => this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx,hy,hz).setTranslation(x,y,z).setFriction(.12).setRestitution(.12));
     wall(-3.25,0,0,.15,2.45,.92); wall(3.25,0,0,.15,2.45,.92);
     wall(0,-2.3,0,3.3,.15,.92); wall(0,2.3,0,3.3,.15,.92);
     wall(0,0,-.87,3.3,2.45,.12); wall(0,0,.87,3.3,2.45,.12);
@@ -21,14 +21,14 @@ export class WaterPhysics {
       this.world.createCollider(RAPIER.ColliderDesc.ball(PEG_RADIUS).setTranslation(x,-.23,0));
     }
     this.rings = Array.from({length:8},(_,i)=>{
-      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setCcdEnabled(true).setCanSleep(false).setLinearDamping(.5).setAngularDamping(1.7));
+      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setCcdEnabled(true).setCanSleep(false).setLinearDamping(0).setAngularDamping(1.7));
       // 24 overlapping capsule segments preserve a genuine empty ring centre.
       for(let j=0;j<24;j++) {
         const a=j*Math.PI*2/24, b=(j+1)*Math.PI*2/24;
         const p=new Vector3(Math.cos(a)*RADIUS,Math.sin(a)*RADIUS,0), q=new Vector3(Math.cos(b)*RADIUS,Math.sin(b)*RADIUS,0);
         const midpoint=p.clone().add(q).multiplyScalar(.5);
         const rotation=new Quaternion().setFromUnitVectors(new Vector3(0,1,0),q.clone().sub(p).normalize());
-        this.world.createCollider(RAPIER.ColliderDesc.capsule(p.distanceTo(q)/2,TUBE).setTranslation(...midpoint.toArray()).setRotation(rotation).setDensity(1.1).setFriction(.24).setRestitution(.08),body);
+        this.world.createCollider(RAPIER.ColliderDesc.capsule(p.distanceTo(q)/2,TUBE).setTranslation(...midpoint.toArray()).setRotation(rotation).setDensity(1.1).setFriction(.12).setRestitution(.08),body);
       }
       return {body,index:i,scored:false,peg:-1};
     });

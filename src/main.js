@@ -9,7 +9,7 @@ document.querySelector('#app').innerHTML=`
 <main><div class="intro"><div><div class="eyebrow">THE LITTLE THINGS / 001</div><h1>把快乐，握在手心。</h1><p>按下水流，让八枚彩环轻轻落在柱上。</p></div><div class="edition">WATER RING TOSS<br>交互式 3D 水压套圈机</div></div>
 <div class="layout"><div><div class="stage"><span class="stage-label">AQUA — ORIGINAL EDITION</span><div class="view-controls"><button id="view">侧面观察</button><button id="reset">重新开始 ↻</button></div><canvas id="scene" aria-label="3D 水压套圈游戏机，拖动旋转，Shift 拖动晃动"></canvas><div id="loading">正在注入一小片快乐…</div><div class="hint">拖动机身旋转 · Shift + 拖动晃动 · 滚轮缩放</div><div id="message" class="hidden"><div class="eyebrow">A LITTLE VICTORY</div><h2>八枚快乐，全部接住。</h2><p id="win-detail"></p><button id="again">再玩一次 ↗</button></div></div>
 <div class="under"><div class="pumps"><button class="pump" id="left" aria-label="左侧水压"><span>◉ 左侧水压</span><kbd>A</kbd></button><button class="pump" id="right" aria-label="右侧水压"><span>右侧水压 ◉</span><kbd>D</kbd></button></div><p>按住连续泵水 · 最快每 0.2 秒一次<br>Shift 加强 / Shift + 空格 最强 · 支持笔压</p></div>
-<section class="motion-panel" aria-label="手机体感控制"><div class="motion-actions"><button id="motion-toggle" aria-pressed="false">启用手机体感</button><button id="motion-calibrate" disabled>校准握姿</button></div><p id="motion-status" role="status">手机倾斜控制重力，晃动施加惯性。点击启用后授权，按自然握姿校准。</p><p class="motion-help">需要 HTTPS 与设备支持。双指可同时按左右水压；普通触屏用三档力度控制。</p></section>
+<section class="motion-panel" aria-label="手机体感控制"><div class="motion-actions"><button id="motion-toggle" aria-pressed="false">启用手机体感</button><button id="motion-calibrate" disabled>刷新姿态</button></div><p id="motion-status" role="status">像握住真实套圈机一样：竖握向下沉，侧倾向低侧滑，倒置向顶部落。</p><p id="gravity-readout" class="motion-help">真实重力模式 · 平放时圆环沉向屏幕背面</p><p class="motion-help">需要 HTTPS 与设备支持。双指可同时按左右水压；普通触屏用三档力度控制。</p></section>
 <section class="key-guide" aria-labelledby="key-guide-title">
   <div class="key-guide-heading"><h2 id="key-guide-title">操作键位</h2><span>按住喷水 · 组合键同时按</span></div>
   <dl class="key-guide-grid">
@@ -86,6 +86,11 @@ const motion = new MotionControls({
     // Keep the virtual case readable: the player is already rotating the real screen.
     machine.quaternion.identity();
     sim.setOrientation(new THREE.Quaternion().setFromUnitVectors(g,new THREE.Vector3(0,-1,0)));
+    const tilt=Math.round(Math.acos(THREE.MathUtils.clamp(-g.y,-1,1))*180/Math.PI);
+    const lateral=Math.hypot(g.x,g.y);
+    const direction=lateral<.25?(g.z<0?'屏幕背面':'屏幕正面'):
+      (Math.abs(g.x)>Math.abs(g.y)?(g.x>0?'右侧':'左侧'):(g.y>0?'顶部':'底部'));
+    $('#gravity-readout').textContent=`真实重力 → ${direction} · 偏离竖直 ${tilt}°`;
   },
   onShake:impulse=>sim.shake(impulse),
   onStatus:message=>{
@@ -95,6 +100,7 @@ const motion = new MotionControls({
     $('#motion-toggle').setAttribute('aria-pressed',String(motion.enabled));
     $('#motion-calibrate').disabled=!motion.enabled||!motion.raw;
     if(!motion.enabled&&!motion.pending)applyManualOrientation();
+    if(!motion.enabled&&!motion.pending)$('#gravity-readout').textContent='手动模式 · 启用体感可查看实时重力方向';
   }
 });
 $('#motion-toggle').onclick=()=>{if(motion.enabled)motion.disable();else void motion.enable();};

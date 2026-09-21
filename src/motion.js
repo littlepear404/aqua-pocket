@@ -1,9 +1,9 @@
-import { Quaternion, Vector3 } from 'three';
+import { Vector3 } from 'three';
 
 const radians = Math.PI / 180;
 const down = new Vector3(0, -1, 0);
 export function screenVector(v, angle = 0) {
-  return v.clone().applyAxisAngle(new Vector3(0, 0, 1), -angle * radians);
+  return v.clone().applyAxisAngle(new Vector3(0, 0, 1), angle * radians);
 }
 export function deviceGravity(beta, gamma, angle = 0) {
   const b = beta * radians, g = gamma * radians;
@@ -14,10 +14,16 @@ export class MotionControls {
   constructor({ onGravity, onShake, onStatus, isPaused = () => false, env = window }) {
     Object.assign(this, { onGravity, onShake, onStatus, isPaused, env });
     this.enabled = false; this.pending = false; this.generation = 0;
-    this.calibration = new Quaternion(); this.smoothed = down.clone();
+    this.smoothed = down.clone();
     this.orientationListener = e => this.orientation(e);
     this.motionListener = e => this.motion(e);
-    this.screenListener = () => { this.raw = null; this.lastMotion = null; this.lastOrientation = null; this.onStatus('屏幕方向已改变，请保持自然握姿，自动重新校准。'); };
+    this.screenListener = () => {
+      this.lastMotion = null; this.lastOrientation = null;
+      if (this.sample) {
+        this.raw = deviceGravity(this.sample.beta, this.sample.gamma, this.angle());
+        this.calibrate();
+      }
+    };
   }
   angle() { return this.env.screen?.orientation?.angle ?? this.env.orientation ?? 0; }
   async enable() {
@@ -38,12 +44,12 @@ export class MotionControls {
       this.onStatus('未获得姿态权限；可在浏览器设置中允许后重试，或继续触控操作。'); return;
     }
     this.motionAllowed = permissions[1].status === 'fulfilled' && permissions[1].value === 'granted';
-    this.enabled = true; this.raw = null; this.lastMotion = null; this.lastOrientation = null; this.motionSeen = false;
+    this.enabled = true; this.raw = null; this.sample = null; this.lastMotion = null; this.lastOrientation = null; this.motionSeen = false;
     this.env.addEventListener('deviceorientation', this.orientationListener);
     if (this.motionAllowed) this.env.addEventListener('devicemotion', this.motionListener);
     this.env.addEventListener('orientationchange', this.screenListener);
     this.env.screen?.orientation?.addEventListener?.('change', this.screenListener);
-    this.onStatus('等待传感器，请自然握住手机…');
+    this.onStatus('等待传感器，重力将跟随手机真实姿态…');
     this.timer = this.env.setTimeout(() => {
       if (!this.raw) this.disable('未收到姿态数据，已恢复触控；请检查设备、权限，或用系统浏览器打开。');
     }, 5000);
@@ -59,9 +65,9 @@ export class MotionControls {
   }
   calibrate() {
     if (!this.raw) return;
-    this.calibration.setFromUnitVectors(this.raw.clone().normalize(), down);
-    this.smoothed.copy(down); this.lastMotion = null;
-    this.onGravity(down.clone()); this.report();
+    // Refresh filtering only. Never redefine physical gravity around the user's grip.
+    this.smoothed.copy(this.raw); this.lastMotion = null;
+    this.onGravity(this.raw.clone()); this.report();
   }
   report() {
     this.onStatus(this.motionSeen ? '体感已连接：倾斜调整重力，晃动施加惯性。' : '倾斜已连接；晃动尚不可用，可使用轻晃 / 用力晃按钮。');
@@ -70,13 +76,16 @@ export class MotionControls {
     if (!this.enabled || this.isPaused()) return;
     if (!Number.isFinite(event.beta) || !Number.isFinite(event.gamma)) return;
     const first = !this.raw;
+    this.sample = { beta: event.beta, gamma: event.gamma };
     this.raw = deviceGravity(event.beta, event.gamma, this.angle());
     if (first) { this.env.clearTimeout(this.timer); this.calibrate(); }
     const now = event.timeStamp;
     const dt = this.lastOrientation == null ? 1 / 60 : Math.min(.1, Math.max(0, (now - this.lastOrientation) / 1000));
     this.lastOrientation = now;
-    const target = this.raw.clone().applyQuaternion(this.calibration);
-    this.smoothed.lerp(target, 1 - Math.exp(-dt * 18));
+    const target = this.raw;
+    // Snap major reversals: vector lerp of opposite directions can stay on the old axis.
+    if (this.smoothed.dot(target) < 0) this.smoothed.copy(target);
+    else this.smoothed.lerp(target, 1 - Math.exp(-dt * 28));
     if (this.smoothed.lengthSq() < .001) this.smoothed.copy(target);
     this.onGravity(this.smoothed.clone().normalize());
   }
@@ -89,7 +98,7 @@ export class MotionControls {
     const now = event.timeStamp;
     const dt = this.lastMotion == null ? 0 : Math.min(.05, Math.max(0, (now - this.lastMotion) / 1000));
     this.lastMotion = now;
-    const vector = screenVector(new Vector3(a.x, a.y, a.z), this.angle()).applyQuaternion(this.calibration);
+    const vector = screenVector(new Vector3(a.x, a.y, a.z), this.angle());
     if (vector.length() < .8 || !dt) return;
     this.onShake(vector.clampLength(0, 35).multiplyScalar(-dt * .65));
   }

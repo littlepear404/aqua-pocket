@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Vector3 } from 'three';
+import { Vector3, Quaternion } from 'three';
+import { WaterPhysics } from '../src/physics.js';
 import { MotionControls, deviceGravity, screenVector } from '../src/motion.js';
 
 function fixture(overrides={}) {
@@ -15,7 +16,9 @@ test('gravity covers flat/upright/inverted devices and landscape axes',()=>{
   assert.ok(deviceGravity(90,0).distanceTo(new Vector3(0,-1,0))<1e-6);
   assert.ok(deviceGravity(-90,0).distanceTo(new Vector3(0,1,0))<1e-6);
   assert.ok(deviceGravity(0,0).distanceTo(new Vector3(0,0,-1))<1e-6);
-  assert.ok(screenVector(new Vector3(1,0,0),90).distanceTo(new Vector3(0,-1,0))<1e-6);
+  assert.ok(screenVector(new Vector3(-1,0,0),90).distanceTo(new Vector3(0,-1,0))<1e-6);
+  assert.ok(deviceGravity(0,-90,90).distanceTo(new Vector3(0,-1,0))<1e-6);
+  assert.ok(deviceGravity(0,90,270).distanceTo(new Vector3(0,-1,0))<1e-6);
 });
 test('insecure and unsupported browsers preserve manual fallback',async()=>{
   for(const overrides of [{isSecureContext:false},{DeviceOrientationEvent:undefined}]){
@@ -32,12 +35,33 @@ test('denial, timeout and cancellation cleanly leave manual controls available',
   const empty=fixture();await empty.motion.enable();empty.motion.orientation({beta:null,gamma:null});empty.timeout();assert.equal(empty.motion.enabled,false);assert.equal(empty.events.size,0);
   let resolve;const cancel=fixture({DeviceOrientationEvent:{requestPermission:()=>new Promise(r=>resolve=r)}});const pending=cancel.motion.enable();cancel.motion.disable();resolve('granted');await pending;assert.equal(cancel.events.size,0);
 });
-test('first sample calibrates grip and changed posture updates gravity; recalibration resets',async()=>{
-  const f=fixture();await f.motion.enable();f.motion.orientation({beta:45,gamma:10,timeStamp:0});assert.ok(f.gravity.at(-1).distanceTo(new Vector3(0,-1,0))<1e-6);
+test('initial tilted grip and refresh preserve real gravity instead of zeroing tilt',async()=>{
+  const f=fixture();await f.motion.enable();f.motion.orientation({beta:45,gamma:10,timeStamp:0});assert.ok(f.gravity.at(-1).distanceTo(deviceGravity(45,10))<1e-6);
   for(let i=1;i<=30;i++)f.motion.orientation({beta:-45,gamma:35,timeStamp:i*16});
   assert.ok(f.gravity.at(-1).distanceTo(new Vector3(0,-1,0))>.5);
-  f.motion.calibrate();assert.ok(f.gravity.at(-1).distanceTo(new Vector3(0,-1,0))<1e-6);
-  f.env.screen.orientation.angle=90;f.events.get('orientationchange')();f.motion.orientation({beta:0,gamma:45,timeStamp:600});assert.ok(f.gravity.at(-1).distanceTo(new Vector3(0,-1,0))<1e-6);
+  f.motion.calibrate();assert.ok(f.gravity.at(-1).distanceTo(deviceGravity(-45,35))<1e-6);
+  f.env.screen.orientation.angle=90;f.events.get('orientationchange')();assert.ok(f.gravity.at(-1).distanceTo(deviceGravity(-45,35,90))<1e-6);
+});
+test('a single inversion sample immediately reverses gravity',async()=>{
+  const f=fixture();await f.motion.enable();f.motion.orientation({beta:90,gamma:0,timeStamp:0});
+  f.motion.orientation({beta:-90,gamma:0,timeStamp:16});assert.ok(f.gravity.at(-1).y>.99);
+});
+test('sensor-to-physics: sideways tilt moves settled rings and inversion lifts them',async()=>{
+  const s=await WaterPhysics.create();const f=fixture();
+  f.motion.onGravity=g=>s.setOrientation(new Quaternion().setFromUnitVectors(g,new Vector3(0,-1,0)));
+  await f.motion.enable();f.motion.orientation({beta:90,gamma:0,timeStamp:0});
+  for(let i=0;i<600;i++)s.step();
+  const before=s.rings.reduce((a,r)=>a+r.body.translation().x,0)/8;
+  // Hold a 60-degree sideways tilt, with no water pulses or shake.
+  for(let i=0;i<360;i++){f.motion.orientation({beta:30,gamma:90,timeStamp:16+i*1000/120});s.step();}
+  const after=s.rings.reduce((a,r)=>a+r.body.translation().x,0)/8;
+  // Pegs physically obstruct some rings; require clear movement of the whole group's mean.
+  assert.ok(after-before>.5,`mean lateral displacement ${after-before}`);
+  const low=s.rings.reduce((a,r)=>a+r.body.translation().y,0)/8;
+  f.motion.orientation({beta:-90,gamma:0,timeStamp:4000});
+  for(let i=0;i<600;i++)s.step();
+  const high=s.rings.reduce((a,r)=>a+r.body.translation().y,0)/8;
+  assert.ok(high-low>2,`mean rise ${high-low}`);s.dispose();
 });
 test('motion permission may fail while orientation continues',async()=>{
   const f=fixture({DeviceMotionEvent:{requestPermission:()=>Promise.reject(Error('blocked'))}});await f.motion.enable();assert.equal(f.motion.enabled,true);assert.equal(f.events.has('devicemotion'),false);
